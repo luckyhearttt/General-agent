@@ -17,7 +17,7 @@ st.set_page_config(
     layout="centered"
 )
 
-# 隐藏多余菜单
+# 隐藏 Streamlit 默认菜单
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -41,7 +41,7 @@ except:
 WELCOME_MESSAGE = "我是你的专属 AI 导师。你可以问我关于教学策略的问题，或者让我帮你评估你的教案构思。让我们开始吧！"
 
 # ==========================================
-# 2. 数据库逻辑 (回归你提供的稳定版逻辑)
+# 2. 数据库逻辑 (保持不变，最稳的逻辑)
 # ==========================================
 
 @st.cache_resource
@@ -56,13 +56,12 @@ def get_google_sheet():
         client = gspread.authorize(creds)
         return client.open(SHEET_NAME).sheet1
     except Exception as e:
-        print(f"DB Connection Error: {e}")
+        print(f"DB Error: {e}")
         return None
 
 def save_to_sheet(sheet, user_name, role, content):
     if sheet:
-        # 简单延时防并发
-        time.sleep(random.uniform(0.1, 0.3))
+        time.sleep(random.uniform(0.1, 0.3)) # 简单防并发
         time_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
             sheet.append_row([time_now, user_name, role, content])
@@ -87,26 +86,29 @@ def load_history_from_sheet(sheet, user_name):
         return []
 
 # ==========================================
-# 3. AI 核心逻辑 (改为生成器，供 write_stream 使用)
+# 3. AI 核心逻辑 (回归 V2 同步模式)
 # ==========================================
 
-def chat_with_coze_stream(query, user_name):
+def chat_with_coze_sync(query, user_name):
     """
-    这是一个生成器函数，专门用于流式输出
+    同步模式：等待 AI 生成完整回复后再返回。
     """
     url = "https://api.coze.cn/v3/chat"
     headers = {"Authorization": f"Bearer {COZE_API_TOKEN}", "Content-Type": "application/json"}
     safe_user_id = f"stu_{user_name}".replace(" ", "_")
     
     data = {
-        "bot_id": BOT_ID, "user_id": safe_user_id, "stream": True,
+        "bot_id": BOT_ID, 
+        "user_id": safe_user_id, 
+        "stream": True, # 依然使用 stream 接口，因为有些 Bot 强制 stream
         "auto_save_history": True,
         "additional_messages": [{"role": "user", "content": query, "content_type": "text"}]
     }
     
+    full_content = ""
     try:
         response = requests.post(url, headers=headers, json=data, stream=True)
-        
+        # 循环读取所有数据包，拼凑成完整的一句话
         for line in response.iter_lines():
             if not line: continue
             decoded_line = line.decode('utf-8')
@@ -115,18 +117,20 @@ def chat_with_coze_stream(query, user_name):
                 try:
                     if json_str.strip() == "[DONE]": continue
                     chunk = json.loads(json_str)
-                    
-                    # 🌟 只提取增量内容，避免重复
                     if chunk.get('event') == 'conversation.message.delta':
-                        content = chunk.get('content', '')
-                        if content:
-                            yield content
+                        full_content += chunk.get('content', '')
+                    # 兼容部分非 delta 类型的返回
+                    elif chunk.get('type') == 'answer':
+                        full_content += chunk.get('content', '')
                 except: continue
+        
+        return full_content if full_content else "AI 似乎在思考，但没有回应..."
+        
     except Exception as e:
-        yield f"Error: {str(e)}"
+        return f"连接错误: {str(e)}"
 
 # ==========================================
-# 4. 界面逻辑 (极简版)
+# 4. 界面逻辑
 # ==========================================
 
 if "db_conn" not in st.session_state:
@@ -162,19 +166,25 @@ if 'user_name' not in st.session_state:
 
 # --- 主界面 ---
 
-# 侧边栏
+# 侧边栏：任务书 (UI 优化)
 with st.sidebar:
     st.markdown(f"**👤 学员: {st.session_state.user_name}**")
     st.divider()
-    st.markdown("### 📝 你的任务")
-    st.markdown("""
-    **设计一个 5-10 分钟的课堂教学片段。**
+    
+    # 🌟 使用 st.info 给任务加一个蓝色背景框
+    st.info("""
+    **📝 你的任务**
+    
+    为未来可能教的一个科目，**设计一个 5-10 分钟的课堂教学片段**。
     
     1. **要求：** 运用至少 2 种对话式教学策略。
     2. **工具：** 自由使用 AI 辅助。
     3. **提交：** 完成后请提交至 Moodle。
     """)
-    st.warning("⚠️ **提示：** AI 可能会犯错，请保持独立思考。")
+    
+    # 使用 st.warning 给提示加一个黄色背景框
+    st.warning("**⚠️ 提示：** AI 可能会犯错，请保持独立思考。")
+    
     if st.button("退出登录"):
         st.session_state.clear()
         st.rerun()
@@ -189,17 +199,22 @@ for msg in st.session_state.messages:
 # 处理输入
 if prompt := st.chat_input("在此输入你的问题..."):
     
-    # 1. 立即显示并保存用户输入
+    # 1. 立即显示用户输入
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
     save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "学生", prompt)
 
-    # 2. 生成 AI 回复 (使用官方 write_stream，完美解决重复问题)
+    # 2. 生成 AI 回复 (带 Loading 状态)
     with st.chat_message("assistant"):
-        # write_stream 会自动处理生成器，打完字后返回完整的字符串
-        full_response = st.write_stream(chat_with_coze_stream(prompt, st.session_state.user_name))
+        # 🌟 这里就是你要的：AI 正在分析...
+        with st.spinner("🧠 AI 正在分析你的回答..."):
+            # 这里代码会暂停，直到 response 全部生成完毕
+            response_text = chat_with_coze_sync(prompt, st.session_state.user_name)
+        
+        # 思考结束后，一次性打印出来 (绝对不会有双重打印)
+        st.markdown(response_text)
     
     # 3. 保存 AI 回复
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
-    save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", full_response)
+    st.session_state.messages.append({"role": "assistant", "content": response_text})
+    save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", response_text)
