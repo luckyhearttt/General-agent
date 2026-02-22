@@ -18,14 +18,13 @@ st.set_page_config(
 )
 
 # 隐藏菜单
-hide_st_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            </style>
-            """
-st.markdown(hide_st_style, unsafe_allow_html=True)
+st.markdown("""
+<style>
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+</style>
+""", unsafe_allow_html=True)
 
 # 获取 Secrets
 try:
@@ -41,7 +40,7 @@ except:
 WELCOME_MESSAGE = "我是你的专属 AI 导师。你可以问我关于教学策略的问题，或者让我帮你评估你的教案构思。让我们开始吧！"
 
 # ==========================================
-# 2. 数据库逻辑
+# 2. 数据库与 API 逻辑
 # ==========================================
 
 @st.cache_resource
@@ -61,13 +60,12 @@ def get_google_sheet():
 
 def save_to_sheet(sheet, user_name, role, content):
     if sheet:
-        # 随机延迟，防止多人并发时的冲突
-        time.sleep(random.uniform(0.1, 0.3))
+        time.sleep(random.uniform(0.1, 0.3)) 
         time_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
             sheet.append_row([time_now, user_name, role, content])
-        except Exception as e:
-            print(f"Save Error: {e}")
+        except:
+            pass
 
 def load_history_from_sheet(sheet, user_name):
     if not sheet: return []
@@ -86,19 +84,14 @@ def load_history_from_sheet(sheet, user_name):
     except:
         return []
 
-# ==========================================
-# 3. AI 核心逻辑 (稳定同步版)
-# ==========================================
-
 def chat_with_coze_sync(query, user_name):
+    """同步调用 Coze，等待完整回复"""
     url = "https://api.coze.cn/v3/chat"
     headers = {"Authorization": f"Bearer {COZE_API_TOKEN}", "Content-Type": "application/json"}
     safe_user_id = f"stu_{user_name}".replace(" ", "_")
     
     data = {
-        "bot_id": BOT_ID, 
-        "user_id": safe_user_id, 
-        "stream": True,
+        "bot_id": BOT_ID, "user_id": safe_user_id, "stream": True,
         "auto_save_history": True,
         "additional_messages": [{"role": "user", "content": query, "content_type": "text"}]
     }
@@ -124,17 +117,13 @@ def chat_with_coze_sync(query, user_name):
         return f"连接错误: {str(e)}"
 
 # ==========================================
-# 4. 界面逻辑
+# 3. 界面主逻辑
 # ==========================================
 
 if "db_conn" not in st.session_state:
     st.session_state.db_conn = get_google_sheet()
 
-# 初始化防抖变量
-if "last_processed_prompt" not in st.session_state:
-    st.session_state.last_processed_prompt = None
-
-# --- 登录页 ---
+# --- 登录 ---
 if 'user_name' not in st.session_state:
     st.markdown("<br><br>", unsafe_allow_html=True)
     st.markdown("<h1 style='text-align: center;'>🎓 登录你的课堂</h1>", unsafe_allow_html=True)
@@ -161,68 +150,57 @@ if 'user_name' not in st.session_state:
                 st.error("⚠️ 请输入姓名")
     st.stop()
 
-# --- 主界面 ---
+# --- 聊天界面 ---
 
-# 侧边栏
+# 侧边栏 (保留你喜欢的样式)
 with st.sidebar:
     st.markdown(f"**👤 学员: {st.session_state.user_name}**")
     st.divider()
-    
-    # 蓝色背景框：任务说明
     st.info("""
     **📝 你的任务**
     
-    为未来可能教的一个科目，**设计一个 5-10 分钟的课堂教学片段**。
+    设计一个 5-10 分钟的课堂教学片段。
     
     1. **要求：** 运用至少 2 种对话式教学策略。
     2. **工具：** 自由使用 AI 辅助。
     3. **提交：** 完成后请提交至 Moodle。
     """)
-    
-    # 黄色背景框：提示
     st.warning("**⚠️ 提示：** AI 可能会犯错，请保持独立思考。")
-    
     if st.button("退出登录"):
         st.session_state.clear()
         st.rerun()
 
 st.title("🎓 教学对话练习")
 
-# 1. 循环打印历史记录 (这是页面上唯一的打印逻辑，保证不重复)
+# 显示历史 (这是唯一的显示逻辑)
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 2. 处理新输入
+# --- 核心：输入与防重逻辑 ---
 if prompt := st.chat_input("在此输入你的问题..."):
     
-    # 🛡️ 防抖动检查：如果这次的输入和上次完全一样，大概率是重复提交，直接跳过
-    if prompt == st.session_state.last_processed_prompt:
-        st.stop()
-    
-    # 更新防抖状态
-    st.session_state.last_processed_prompt = prompt
+    # 🛑【防重锁】关键代码
+    # 检查历史记录最后一条。如果最后一条的角色是 "user" 且内容完全一样，
+    # 说明代码正在“幽灵”重跑，直接终止，防止重复写入。
+    if len(st.session_state.messages) > 0:
+        last_msg = st.session_state.messages[-1]
+        if last_msg["role"] == "user" and last_msg["content"] == prompt:
+            st.stop() 
 
-    # A. 显示用户输入 (临时的，等下 rerun 后会由上面的循环接管)
+    # 1. 正常处理用户输入
+    st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
-    
-    # B. 更新本地状态 + 存数据库
-    st.session_state.messages.append({"role": "user", "content": prompt})
     save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "学生", prompt)
 
-    # C. 生成 AI 回复 (带 Loading 动画)
+    # 2. AI 处理 (带 Loading 状态)
     with st.chat_message("assistant"):
         with st.spinner("🧠 AI 正在分析你的回答..."):
-            response_text = chat_with_coze_sync(prompt, st.session_state.user_name)
-            
-    # D. 更新本地状态 + 存数据库
-    st.session_state.messages.append({"role": "assistant", "content": response_text})
-    save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", response_text)
-    
-    # E. 🚀 关键一步：强制刷新！
-    # 这一步会立该重新运行脚本。
-    # 重跑时，prompt 会变为空，脚本会直接跳过这个 if 块，
-    # 而是只执行上面的 for 循环，把刚才存进去的对话打印出来。
-    # 这就完美避免了“既手动打印，又循环打印”的双重显示问题。
-    st.rerun()
+            response = chat_with_coze_sync(prompt, st.session_state.user_name)
+            st.markdown(response) # 思考完了一次性打出来
+
+    # 3. 保存 AI 回复
+    st.session_state.messages.append({"role": "assistant", "content": response})
+    save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", response)
+
