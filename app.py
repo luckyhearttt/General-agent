@@ -40,7 +40,7 @@ except:
 WELCOME_MESSAGE = "我是你的专属 AI 导师。你可以问我关于教学策略的问题，或者让我帮你评估你的教案构思。让我们开始吧！"
 
 # ==========================================
-# 2. 数据库与 API 逻辑
+# 2. 数据库逻辑
 # ==========================================
 
 @st.cache_resource
@@ -84,40 +84,53 @@ def load_history_from_sheet(sheet, user_name):
     except:
         return []
 
-def chat_with_coze_sync(query, user_name):
-    """同步调用 Coze，等待完整回复"""
+# ==========================================
+# 3. AI 核心逻辑 (回归 V1：非流式)
+# ==========================================
+
+def chat_with_coze_no_stream(query, user_name):
+    """
+    使用 stream=False，这与你本地成功的 V1 版本逻辑完全一致。
+    它等待整个 JSON 包返回，解析 answer，绝对不会重复拼接。
+    """
     url = "https://api.coze.cn/v3/chat"
-    headers = {"Authorization": f"Bearer {COZE_API_TOKEN}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {COZE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
     safe_user_id = f"stu_{user_name}".replace(" ", "_")
     
     data = {
-        "bot_id": BOT_ID, "user_id": safe_user_id, "stream": True,
+        "bot_id": BOT_ID, 
+        "user_id": safe_user_id, 
+        "stream": False,  # 🌟 关键点：关闭流式，杜绝重复拼接
         "auto_save_history": True,
         "additional_messages": [{"role": "user", "content": query, "content_type": "text"}]
     }
     
-    full_content = ""
     try:
-        response = requests.post(url, headers=headers, json=data, stream=True)
-        for line in response.iter_lines():
-            if not line: continue
-            decoded_line = line.decode('utf-8')
-            if decoded_line.startswith("data:"):
-                json_str = decoded_line[5:]
-                try:
-                    if json_str.strip() == "[DONE]": continue
-                    chunk = json.loads(json_str)
-                    if chunk.get('event') == 'conversation.message.delta':
-                        full_content += chunk.get('content', '')
-                    elif chunk.get('type') == 'answer':
-                        full_content += chunk.get('content', '')
-                except: continue
-        return full_content if full_content else "AI 似乎在思考，但没有回应..."
+        response = requests.post(url, headers=headers, json=data)
+        
+        if response.status_code == 200:
+            res_json = response.json()
+            if res_json.get('code') != 0:
+                return f"Coze Error: {res_json.get('msg')}"
+
+            # 解析 V3 非流式返回结构，寻找 type='answer'
+            messages = res_json.get('data', [])
+            for msg in messages:
+                if msg['type'] == 'answer':
+                    return msg['content']
+            
+            return "（AI 似乎思考了很久，但没有返回文本内容）"
+        else:
+            return f"Network Error: {response.status_code}"
+            
     except Exception as e:
-        return f"连接错误: {str(e)}"
+        return f"Error: {str(e)}"
 
 # ==========================================
-# 3. 界面主逻辑
+# 4. 界面主逻辑
 # ==========================================
 
 if "db_conn" not in st.session_state:
@@ -152,10 +165,11 @@ if 'user_name' not in st.session_state:
 
 # --- 聊天界面 ---
 
-# 侧边栏 (保留你喜欢的样式)
 with st.sidebar:
     st.markdown(f"**👤 学员: {st.session_state.user_name}**")
     st.divider()
+    
+    # 蓝色背景框：任务说明
     st.info("""
     **📝 你的任务**
     
@@ -172,35 +186,39 @@ with st.sidebar:
 
 st.title("🎓 教学对话练习")
 
-# 显示历史 (这是唯一的显示逻辑)
+# 显示历史
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# --- 核心：输入与防重逻辑 ---
+# 输入处理
 if prompt := st.chat_input("在此输入你的问题..."):
     
-    # 🛑【防重锁】关键代码
-    # 检查历史记录最后一条。如果最后一条的角色是 "user" 且内容完全一样，
-    # 说明代码正在“幽灵”重跑，直接终止，防止重复写入。
+    # 🛑 防重锁 (双保险)
     if len(st.session_state.messages) > 0:
         last_msg = st.session_state.messages[-1]
         if last_msg["role"] == "user" and last_msg["content"] == prompt:
             st.stop() 
 
-    # 1. 正常处理用户输入
+    # 1. 显示并保存用户输入
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
     save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "学生", prompt)
 
-    # 2. AI 处理 (带 Loading 状态)
+    # 2. 调用 AI (关键修改：使用非流式)
     with st.chat_message("assistant"):
         with st.spinner("🧠 AI 正在分析你的回答..."):
-            response = chat_with_coze_sync(prompt, st.session_state.user_name)
-            st.markdown(response) # 思考完了一次性打出来
+            # 这里调用的是 V1 逻辑的函数
+            response = chat_with_coze_no_stream(prompt, st.session_state.user_name)
+            st.markdown(response)
 
     # 3. 保存 AI 回复
     st.session_state.messages.append({"role": "assistant", "content": response})
     save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", response)
+
+    # 4. 强制刷新，防止 UI 残留
+    # 虽然非流式不容易出 UI Bug，但为了保险起见，保持 input 框清空
+    # 注意：不需要 st.rerun()，因为一次性渲染也是安全的。
+    # 只需要让它自然结束即可。
 
