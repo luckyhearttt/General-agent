@@ -108,12 +108,10 @@ def chat_with_coze(query, user_name):
 
 if "db_conn" not in st.session_state:
     st.session_state.db_conn = get_google_sheet()
-
-# 初始化关键状态
 if "messages" not in st.session_state:
     st.session_state.messages = []
-if "processing" not in st.session_state:
-    st.session_state.processing = False
+if "pending_prompt" not in st.session_state:
+    st.session_state.pending_prompt = None
 
 # --- 登录页 ---
 if 'user_name' not in st.session_state:
@@ -144,7 +142,6 @@ if 'user_name' not in st.session_state:
 
 # --- 主界面 ---
 
-# 侧边栏
 with st.sidebar:
     st.markdown(f"**👤 学员: {st.session_state.user_name}**")
     st.divider()
@@ -164,45 +161,48 @@ with st.sidebar:
 st.title("🎓 教学对话练习")
 
 # ==========================================
-# 🌟 核心修复：分离"历史消息"与"新消息"的显示
+# 🌟 核心修复：「待处理队列」模式
 # ==========================================
 
-# 步骤 A：渲染所有历史消息（不包括"正在生成的"）
+# 步骤 1：渲染所有历史消息
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 步骤 B：处理新输入
-# 🔒 用 processing 标志防止重复执行
+# 步骤 2：检查是否有待处理的 prompt
+if st.session_state.pending_prompt is not None:
+    prompt_to_process = st.session_state.pending_prompt
+    st.session_state.pending_prompt = None  # 立刻清空，防止重复处理
+    
+    # 生成 AI 回复（流式）
+    with st.chat_message("assistant"):
+        container = st.empty()
+        full_res = ""
+        for chunk in chat_with_coze(prompt_to_process, st.session_state.user_name):
+            full_res += chunk
+            container.markdown(full_res + "▌")
+        container.markdown(full_res)
+    
+    # 存入历史
+    st.session_state.messages.append({"role": "assistant", "content": full_res})
+    
+    # 保存到数据库
+    save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", full_res)
+    
+    # ✅ 关键：强制 rerun，让页面干净地重绘一次
+    # 这次 rerun 后，pending_prompt 已经是 None，不会再进入这个 if
+    st.rerun()
+
+# 步骤 3：接收新输入
 if prompt := st.chat_input("在此输入你的问题..."):
-    if not st.session_state.processing:
-        st.session_state.processing = True
-        
-        # B1. 立刻把用户消息加入历史并显示
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        
-        # B2. 保存用户消息到数据库
-        save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "学生", prompt)
-
-        # B3. 生成 AI 回复（流式，一个字一个字打出来）
-        with st.chat_message("assistant"):
-            container = st.empty()
-            full_res = ""
-            for chunk in chat_with_coze(prompt, st.session_state.user_name):
-                full_res += chunk
-                container.markdown(full_res + "▌")
-            # 最终显示（去掉光标）
-            container.markdown(full_res)
-        
-        # B4. 将 AI 回复存入历史
-        st.session_state.messages.append({"role": "assistant", "content": full_res})
-        
-        # B5. 保存 AI 回复到数据库
-        save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", full_res)
-        
-        # B6. 🔒 解除锁定
-        st.session_state.processing = False
-
-
+    # 3a. 用户消息立刻存入历史
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    # 3b. 保存用户消息到数据库
+    save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "学生", prompt)
+    
+    # 3c. 把 prompt 放入「待处理队列」
+    st.session_state.pending_prompt = prompt
+    
+    # 3d. 触发 rerun → 回到步骤 1 渲染历史 → 步骤 2 检测到 pending → 开始生成
+    st.rerun()
