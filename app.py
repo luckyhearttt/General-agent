@@ -38,7 +38,7 @@ except:
 WELCOME_MESSAGE = "我是你的专属 AI 导师。你可以问我关于教学策略的问题，或者让我帮你评估你的教案构思。让我们开始吧！"
 
 # ==========================================
-# 2. 数据库逻辑 (完全保留 V2)
+# 2. 数据库逻辑
 # ==========================================
 
 @st.cache_resource
@@ -56,14 +56,22 @@ def get_google_sheet():
         st.error(f"⚠️ 无法连接数据库，请联系老师。错误详情: {e}")
         return None
 
+# ✏️【修改点1】写入加重试机制，防止20人并发时偶尔超限丢数据
 def save_to_sheet(sheet, user_name, role, content):
-    if sheet:
-        time.sleep(random.uniform(0.1, 0.3))
-        time_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if not sheet:
+        return
+    time_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    for attempt in range(3):  # 最多重试3次
         try:
+            time.sleep(random.uniform(0.3, 0.8))  # 随机延迟，错开并发
             sheet.append_row([time_now, user_name, role, content])
+            return  # 成功就退出
         except Exception as e:
-            st.error(f"⚠️ 无法保存记录，请联系老师。错误详情: {e}")
+            if attempt < 2:
+                time.sleep(2)  # 失败后等2秒再试
+            else:
+                st.toast(f"⚠️ 记录保存失败，但不影响对话。详情: {e}")
 
 def load_history_from_sheet(sheet, user_name):
     if not sheet: return []
@@ -84,7 +92,7 @@ def load_history_from_sheet(sheet, user_name):
         return []
 
 # ==========================================
-# 3. AI 核心逻辑 (修复双重回复 + 增加上下文)
+# 3. AI 核心逻辑
 # ==========================================
 
 def chat_with_coze(query, user_name):
@@ -92,11 +100,10 @@ def chat_with_coze(query, user_name):
     headers = {"Authorization": f"Bearer {COZE_API_TOKEN}", "Content-Type": "application/json"}
     safe_user_id = f"stu_{user_name}".replace(" ", "_")
     
-    # 🧠【上下文记忆】把最近3轮对话作为上下文发给 Coze
+    # ✏️【修改点2】上下文从6条(3轮)扩大到14条(7轮)
     context_messages = []
     if "messages" in st.session_state:
-        # 取最后6条（3轮 = 3条user + 3条assistant）
-        recent = st.session_state.messages[-6:]
+        recent = st.session_state.messages[-14:]  # 7轮 = 14条消息
         for msg in recent:
             context_messages.append({
                 "role": msg["role"],
@@ -104,7 +111,6 @@ def chat_with_coze(query, user_name):
                 "content_type": "text"
             })
     
-    # 加上本次用户的新输入
     context_messages.append({
         "role": "user",
         "content": query,
@@ -124,39 +130,28 @@ def chat_with_coze(query, user_name):
     try:
         response = requests.post(url, headers=headers, json=data, stream=True)
         
-        # 🛡️【修复核心】正确解析 Coze V3 的流式格式
-        # Coze V3 流式格式是两行一组:
-        #   event:conversation.message.delta
-        #   data:{"role":"assistant","type":"answer","content":"xxx",...}
-        
         current_event = None
         
         for line in response.iter_lines():
             if not line: continue
             decoded_line = line.decode('utf-8')
             
-            # 第一行：读取 event 类型
             if decoded_line.startswith("event:"):
                 current_event = decoded_line[6:].strip()
                 continue
             
-            # 第二行：读取 data 内容
             if decoded_line.startswith("data:"):
                 json_str = decoded_line[5:].strip()
                 if json_str == "[DONE]": continue
                 
-                # 🛡️ 只处理 delta 事件（打字过程），跳过 completed（总结包）
-                # 这就是双重回复的根源：以前没区分这两个事件
                 if current_event == "conversation.message.delta":
                     try:
                         chunk = json.loads(json_str)
-                        # 只收 type=answer 的内容（跳过 function_call 等）
                         if chunk.get('type') == 'answer':
                             full_content += chunk.get('content', '')
                     except:
                         pass
                 
-                # 重置 event，等待下一组
                 current_event = None
                 
         return full_content if full_content else "AI 似乎在思考，但没有回应..."
@@ -165,7 +160,7 @@ def chat_with_coze(query, user_name):
         return f"连接错误: {str(e)}"
 
 # ==========================================
-# 4. 界面逻辑 (完全保留 V2 结构)
+# 4. 界面逻辑
 # ==========================================
 
 if "db_conn" not in st.session_state:
