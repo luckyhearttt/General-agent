@@ -8,26 +8,15 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
 # ==========================================
-# 1. 基础配置 (UI设置)
+# 1. 基础配置
 # ==========================================
 
 st.set_page_config(
     page_title="AI 助手", 
     page_icon="🎓", 
-    layout="centered" # 保持居中，手机和电脑阅读体验最好
+    layout="centered"
 )
 
-# 隐藏 Streamlit 默认的菜单和页脚，让界面更像一个 App
-hide_st_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            </style>
-            """
-st.markdown(hide_st_style, unsafe_allow_html=True)
-
-# 获取 Secrets
 try:
     COZE_API_TOKEN = st.secrets["coze"]["api_token"]
     BOT_ID = st.secrets["coze"]["bot_id"]
@@ -37,7 +26,6 @@ except:
     st.error("⚠️ 密钥未配置，请检查 Streamlit Secrets")
     st.stop()
 
-# 开场白
 WELCOME_MESSAGE = "我是你的专属 AI 导师。你可以问我关于教学策略的问题，或者让我帮你评估你的教案构思。让我们开始吧！"
 
 # ==========================================
@@ -61,13 +49,12 @@ def get_google_sheet():
 
 def save_to_sheet(sheet, user_name, role, content):
     if sheet:
-        # 随机延迟防止多名学生同时写入时的冲突
-        time.sleep(random.uniform(0.1, 0.5)) 
+        time.sleep(random.uniform(0.1, 0.5))
         time_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
             sheet.append_row([time_now, user_name, role, content])
         except:
-            pass # 即使失败也不报错，保证学生体验流畅
+            pass
 
 def load_history_from_sheet(sheet, user_name):
     if not sheet: return []
@@ -87,7 +74,7 @@ def load_history_from_sheet(sheet, user_name):
         return []
 
 # ==========================================
-# 3. AI 核心逻辑 (修复双重回复的关键)
+# 3. AI 核心逻辑
 # ==========================================
 
 def chat_with_coze(query, user_name):
@@ -99,7 +86,6 @@ def chat_with_coze(query, user_name):
         "auto_save_history": True,
         "additional_messages": [{"role": "user", "content": query, "content_type": "text"}]
     }
-    
     try:
         response = requests.post(url, headers=headers, json=data, stream=True)
         for line in response.iter_lines():
@@ -110,13 +96,8 @@ def chat_with_coze(query, user_name):
                 try:
                     if json_str.strip() == "[DONE]": continue
                     chunk = json.loads(json_str)
-                    
-                    # 🚨 关键修复：只接收 'conversation.message.delta' 事件
-                    # 这样可以防止接收 'completed' 或 'answer' 事件导致的重复内容
-                    if chunk.get('event') == 'conversation.message.delta':
-                        content = chunk.get('content', '')
-                        if content:
-                            yield content
+                    if chunk.get('event') == 'conversation.message.delta' or chunk.get('type') == 'answer':
+                        yield chunk.get('content', '')
                 except: continue
     except Exception as e:
         yield f"Error: {str(e)}"
@@ -128,24 +109,27 @@ def chat_with_coze(query, user_name):
 if "db_conn" not in st.session_state:
     st.session_state.db_conn = get_google_sheet()
 
+# 初始化关键状态
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "processing" not in st.session_state:
+    st.session_state.processing = False
+
 # --- 登录页 ---
 if 'user_name' not in st.session_state:
     st.markdown("<br><br>", unsafe_allow_html=True)
-    st.markdown("<h1 style='text-align: center;'>🎓 登录你的课堂</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>🎓 AI 助手</h1>", unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
-        st.info("👋 欢迎！请输入你的姓名和班级暗号开始练习。")
-        name_input = st.text_input("你的姓名 (拼音或英文):", key="login_name")
+        st.info("👋 欢迎！请输入你的姓名和班级暗号。")
+        name_input = st.text_input("请输入你的真实姓名:", key="login_name")
         pwd_input = st.text_input("班级暗号:", type="password")
         
         if st.button("🚀 开始学习", use_container_width=True):
             if name_input and pwd_input == CLASS_PASSWORD:
                 clean_name = name_input.strip()
                 st.session_state.user_name = clean_name
-                # 初始化防抖状态
-                st.session_state.last_prompt = None 
-                
                 with st.spinner("正在连接 AI 导师..."):
                     history = load_history_from_sheet(st.session_state.db_conn, clean_name)
                     st.session_state.messages = history
@@ -160,7 +144,7 @@ if 'user_name' not in st.session_state:
 
 # --- 主界面 ---
 
-# 侧边栏：任务书
+# 侧边栏
 with st.sidebar:
     st.markdown(f"**👤 学员: {st.session_state.user_name}**")
     st.divider()
@@ -179,49 +163,46 @@ with st.sidebar:
 
 st.title("🎓 教学对话练习")
 
-# 聊天区域：显示历史消息
+# ==========================================
+# 🌟 核心修复：分离"历史消息"与"新消息"的显示
+# ==========================================
+
+# 步骤 A：渲染所有历史消息（不包括"正在生成的"）
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 输入框
+# 步骤 B：处理新输入
+# 🔒 用 processing 标志防止重复执行
 if prompt := st.chat_input("在此输入你的问题..."):
-    
-    # 🚨 防双重提交检查：
-    # 如果当前输入和上一条一模一样，且在极短时间内，则忽略（防止双击回车导致双重记录）
-    is_duplicate = False
-    if "last_prompt" in st.session_state and st.session_state.last_prompt == prompt:
-        # 这里只是简单的防重复，通常 chat_input 会自动清空，所以这个情况很少见
-        # 但为了以防万一，我们可以依赖 Streamlit 自身的机制，
-        # 只要不手动 Rerun，基本不会双重提交。
-        pass
-
-    st.session_state.last_prompt = prompt
-
-    # 1. 显示用户输入
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-    save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "学生", prompt)
-
-    # 2. 显示 AI 回复 (流式)
-    with st.chat_message("assistant"):
-        container = st.empty()
-        full_res = ""
+    if not st.session_state.processing:
+        st.session_state.processing = True
         
-        # 调用 AI
-        for chunk in chat_with_coze(prompt, st.session_state.user_name):
-            full_res += chunk
-            container.markdown(full_res + "▌")
+        # B1. 立刻把用户消息加入历史并显示
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
         
-        # 输出完成
-        container.markdown(full_res)
-    
-    # 3. 存入历史
-    st.session_state.messages.append({"role": "assistant", "content": full_res})
-    save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", full_res)
-    
-    # 注意：代码执行到这里自然结束，等待下一次输入。
-    # 绝对不要加 st.rerun()，否则会引发双重打印。
+        # B2. 保存用户消息到数据库
+        save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "学生", prompt)
+
+        # B3. 生成 AI 回复（流式，一个字一个字打出来）
+        with st.chat_message("assistant"):
+            container = st.empty()
+            full_res = ""
+            for chunk in chat_with_coze(prompt, st.session_state.user_name):
+                full_res += chunk
+                container.markdown(full_res + "▌")
+            # 最终显示（去掉光标）
+            container.markdown(full_res)
+        
+        # B4. 将 AI 回复存入历史
+        st.session_state.messages.append({"role": "assistant", "content": full_res})
+        
+        # B5. 保存 AI 回复到数据库
+        save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", full_res)
+        
+        # B6. 🔒 解除锁定
+        st.session_state.processing = False
 
 
