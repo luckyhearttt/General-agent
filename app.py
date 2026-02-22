@@ -2,201 +2,240 @@ import streamlit as st
 import requests
 import json
 import gspread
+import time
+import random
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
 # ==========================================
-# 1. 配置区域
+# 1. 基础配置
 # ==========================================
 
-# 从 Streamlit Secrets 获取敏感信息 (稍后会在网页后台填)
-# 这样代码里就不包含任何密码，非常安全
+st.set_page_config(
+    page_title="AI 助手", 
+    page_icon="🎓", 
+    layout="centered"
+)
+
+# 隐藏菜单
+st.markdown("""
+<style>
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+</style>
+""", unsafe_allow_html=True)
+
+# 获取 Secrets
 try:
     COZE_API_TOKEN = st.secrets["coze"]["api_token"]
     BOT_ID = st.secrets["coze"]["bot_id"]
     SHEET_NAME = st.secrets["google"]["sheet_name"]
-    # 班级密码 (可选，这里先设为通用密码)
     CLASS_PASSWORD = "888" 
 except:
-    # 这是一个防呆设计，防止本地运行时报错太难看
-    st.error("⚠️ 尚未配置 Secrets！请在 Streamlit Cloud 后台配置。")
+    st.error("⚠️ 密钥未配置，请检查 Streamlit Secrets")
     st.stop()
 
+# 开场白
+WELCOME_MESSAGE = "我是你的专属 AI 导师。你可以问我关于教学策略的问题，或者让我帮你评估你的教案构思。让我们开始吧！"
+
 # ==========================================
-# 2. 数据库功能：Google Sheets
+# 2. 数据库逻辑
 # ==========================================
 
+@st.cache_resource
 def get_google_sheet():
-    """连接到 Google 表格"""
-    scope = ['https://spreadsheets.google.com/feeds',
-             'https://www.googleapis.com/auth/drive']
-    
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     try:
-        # 从 Secrets 里读取 JSON 内容
-        # 注意：我们需要把 toml 里的字典转换回 json 对象
-        json_creds = dict(st.secrets["gcp_service_account"])
-        
+        if "json_content" in st.secrets["gcp_service_account"]:
+            json_creds = json.loads(st.secrets["gcp_service_account"]["json_content"])
+        else:
+            json_creds = dict(st.secrets["gcp_service_account"])
         creds = ServiceAccountCredentials.from_json_keyfile_dict(json_creds, scope)
         client = gspread.authorize(creds)
-        
-        # 打开指定的表格
-        sheet = client.open(SHEET_NAME).sheet1
-        return sheet
+        return client.open(SHEET_NAME).sheet1
     except Exception as e:
-        st.error(f"无法连接数据库，请联系老师。错误详情: {e}")
+        print(f"DB Error: {e}")
         return None
 
 def save_to_sheet(sheet, user_name, role, content):
-    """保存一条对话记录"""
     if sheet:
+        time.sleep(random.uniform(0.1, 0.3)) 
         time_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
-            # 追加一行：[时间, 学生姓名, 角色, 内容]
             sheet.append_row([time_now, user_name, role, content])
-        except Exception as e:
-            # 如果网络抖动保存失败，不影响学生继续对话，只在后台打印
-            print(f"Save failed: {e}")
+        except:
+            pass
 
 def load_history_from_sheet(sheet, user_name):
-    """加载历史记录 (断点续传)"""
-    if not sheet:
-        return []
-        
+    if not sheet: return []
     try:
-        # 获取所有记录 (注意：如果数据量上万条，这里需要优化，目前几百条没问题)
-        all_records = sheet.get_all_values() 
-        # get_all_values 返回的是列表的列表，第一行通常是表头
-        
+        all_records = sheet.get_all_values()
         user_history = []
-        # 跳过表头 (假设第一行是标题)
+        target_name = user_name.strip().lower()
         for row in all_records[1:]:
-            # 假设结构是: [时间, 姓名, 角色, 内容]
-            # row[1] 是姓名，row[2] 是角色，row[3] 是内容
-            if len(row) >= 4 and row[1] == user_name:
-                role_map = {"学生": "user", "AI": "assistant", "AI导师": "assistant"}
-                role = role_map.get(row[2], "assistant")
-                user_history.append({"role": role, "content": row[3]})
+            if len(row) >= 4:
+                current_name = str(row[1]).strip().lower() if row[1] else ""
+                if current_name == target_name:
+                    role_map = {"学生": "user", "AI": "assistant", "AI导师": "assistant"}
+                    role = role_map.get(row[2], "assistant")
+                    user_history.append({"role": role, "content": row[3]})
         return user_history
-    except Exception as e:
-        st.warning(f"历史记录加载失败: {e}")
+    except:
         return []
 
 # ==========================================
-# 3. AI 核心：Coze API (流式)
+# 3. AI 核心逻辑 (V10: 修复重复 + 增加记忆)
 # ==========================================
 
-def chat_with_coze(query, user_name):
+def chat_with_coze_fixed(query, user_name):
     url = "https://api.coze.cn/v3/chat"
-    headers = {
-        "Authorization": f"Bearer {COZE_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {COZE_API_TOKEN}", "Content-Type": "application/json"}
+    safe_user_id = f"stu_{user_name}".replace(" ", "_")
     
-    # 使用 safe_user_id 确保 Coze 后台也能区分用户
+    # 构造请求数据
     data = {
-        "bot_id": BOT_ID,
-        "user_id": f"stu_{user_name}",
+        "bot_id": BOT_ID, 
+        "user_id": safe_user_id, 
         "stream": True,
         "auto_save_history": True,
-        "additional_messages": [
-            {"role": "user", "content": query, "content_type": "text"}
-        ]
+        "additional_messages": [{"role": "user", "content": query, "content_type": "text"}]
     }
+    
+    # 🧠【记忆功能】如果之前有对话ID，这次带上它！
+    if "conversation_id" in st.session_state and st.session_state.conversation_id:
+        data["conversation_id"] = st.session_state.conversation_id
+    
+    full_content = ""
     
     try:
         response = requests.post(url, headers=headers, json=data, stream=True)
-        if response.status_code != 200:
-            return f"🚫 网络连接失败: {response.status_code}"
-            
-        full_content = ""
+        
         for line in response.iter_lines():
             if not line: continue
             decoded_line = line.decode('utf-8')
+            
             if decoded_line.startswith("data:"):
-                json_str = decoded_line[5:]
+                json_str = decoded_line[5:] # 去掉前缀 "data:"
                 try:
                     if json_str.strip() == "[DONE]": continue
+                    
                     chunk = json.loads(json_str)
-                    if chunk.get('event') == 'conversation.message.delta' or chunk.get('type') == 'answer':
-                        content = chunk.get('content', '')
+                    event = chunk.get('event')
+                    
+                    # 🧠【记忆更新】捕获新生成的 conversation_id
+                    if event == 'conversation.chat.created':
+                        new_id = chunk.get('data', {}).get('id')
+                        if new_id:
+                            st.session_state.conversation_id = new_id
+
+                    # 🛡️【防重核心】只接收 'delta' (打字过程)，绝对不要 'completed' (总结)
+                    if event == 'conversation.message.delta':
+                        # 注意：delta 的内容通常在 chunk['data']['content'] 或 chunk['content']
+                        # Coze V3 有时结构会有微小变化，这里做个兼容
+                        content = chunk.get('data', {}).get('content', '') or chunk.get('content', '')
                         full_content += content
+                        
+                    # ⚠️ 关键：直接忽略 conversation.message.completed，防止双重拼接！
+                    
                 except: continue
-
-        if not full_content:
-            return "🤔 AI 思考中..."
-        return full_content
-
+        
+        return full_content if full_content else "AI 正在思考..."
+        
     except Exception as e:
-        return f"💥 出错: {str(e)}"
+        return f"连接错误: {str(e)}"
 
 # ==========================================
-# 4. 网页主逻辑
+# 4. 界面主逻辑
 # ==========================================
 
-st.set_page_config(page_title="AI 教学助手", page_icon="🎓", layout="wide")
-
-# 连接数据库 (只连接一次)
 if "db_conn" not in st.session_state:
     st.session_state.db_conn = get_google_sheet()
 
-# --- 登录页 ---
+# 初始化记忆 ID
+if "conversation_id" not in st.session_state:
+    st.session_state.conversation_id = None
+
+# --- 登录 ---
 if 'user_name' not in st.session_state:
+    st.markdown("<br><br>", unsafe_allow_html=True)
     st.markdown("<h1 style='text-align: center;'>🎓 登录你的课堂</h1>", unsafe_allow_html=True)
+    
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
-        name_input = st.text_input("👤 你的姓名 (拼音或英文)：", placeholder="例如：ZhangSan")
-        pwd_input = st.text_input("🔑 班级暗号：", type="password")
+        st.info("👋 欢迎！请输入你的姓名和班级暗号开始练习。")
+        name_input = st.text_input("你的姓名 (拼音或英文):", key="login_name")
+        pwd_input = st.text_input("班级暗号:", type="password")
         
         if st.button("🚀 开始学习", use_container_width=True):
             if name_input and pwd_input == CLASS_PASSWORD:
-                st.session_state.user_name = name_input
-                # 🌟 登陆成功瞬间，去数据库拉取历史记录
-                with st.spinner("正在同步你的学习进度..."):
-                    history = load_history_from_sheet(st.session_state.db_conn, name_input)
+                clean_name = name_input.strip()
+                st.session_state.user_name = clean_name
+                # 登录时重置记忆，开启新对话
+                st.session_state.conversation_id = None
+                
+                with st.spinner("正在连接 AI 导师..."):
+                    history = load_history_from_sheet(st.session_state.db_conn, clean_name)
                     st.session_state.messages = history
+                    if not history:
+                        st.session_state.messages.append({"role": "assistant", "content": WELCOME_MESSAGE})
                 st.rerun()
             elif pwd_input != CLASS_PASSWORD:
-                st.error("暗号错误！")
+                st.error("🚫 暗号错误")
             else:
-                st.error("请输入姓名。")
+                st.error("⚠️ 请输入姓名")
     st.stop()
 
-# --- 聊天页 ---
+# --- 聊天界面 ---
+
 with st.sidebar:
-    st.write(f"当前学生: **{st.session_state.user_name}**")
-    if st.button("🚪 退出 (清除缓存)"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
+    st.markdown(f"**👤 学员: {st.session_state.user_name}**")
+    st.divider()
+    st.info("""
+    **📝 你的任务**
+    
+    设计一个 5-10 分钟的课堂教学片段。
+    
+    1. **要求：** 运用至少 2 种对话式教学策略。
+    2. **工具：** 自由使用 AI 辅助。
+    3. **提交：** 完成后请提交至 Moodle。
+    """)
+    st.warning("**⚠️ 提示：** AI 可能会犯错，请保持独立思考。")
+    if st.button("退出登录"):
+        st.session_state.clear()
         st.rerun()
 
-st.title("🤖 教学对话练习")
+st.title("🎓 教学对话练习")
 
 # 显示历史
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 处理输入
-if prompt := st.chat_input("请输入回答..."):
-    # 1. 用户
+# 输入处理
+if prompt := st.chat_input("在此输入你的问题..."):
+    
+    # 🛑 简单的防重锁 (保留 V7 的优秀设计)
+    if len(st.session_state.messages) > 0:
+        last_msg = st.session_state.messages[-1]
+        if last_msg["role"] == "user" and last_msg["content"] == prompt:
+            st.stop() 
+
+    # 1. 记录用户输入
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
-    # ☁️ 存数据库
     save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "学生", prompt)
 
-    # 2. AI
+    # 2. 生成 AI 回复 (V10 逻辑)
     with st.chat_message("assistant"):
-        response = chat_with_coze(prompt, st.session_state.user_name)
-        st.markdown(response)
-            
-    # 3. AI 记录
-    st.session_state.messages.append({"role": "assistant", "content": response})
-    # ☁️ 存数据库
-    save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", response)
+        with st.spinner("🧠 AI 正在分析你的回答..."):
+            response_text = chat_with_coze_fixed(prompt, st.session_state.user_name)
+            st.markdown(response_text)
+    
+    # 3. 记录 AI 回复
+    st.session_state.messages.append({"role": "assistant", "content": response_text})
+    save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", response_text)
 
 
 
