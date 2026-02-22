@@ -222,6 +222,7 @@ with st.sidebar:
     
     **Step 3. 分析评估**
     结合 **APT (Academic Productive Talk)** 等策略，分析该对话场景的优缺点。
+    
     ---
     **🛠️ 工具**: 全程可使用本 AI 进行资料查询、教案检查、场景生成和评估。
     """)
@@ -274,6 +275,7 @@ if prompt := st.chat_input("在此输入你的问题..."):
     # 3. 保存 AI 回复
     st.session_state.messages.append({"role": "assistant", "content": response})
     save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", response)
+
 
 
 
