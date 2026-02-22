@@ -198,6 +198,19 @@ if 'user_name' not in st.session_state:
 with st.sidebar:
     st.markdown(f"**👤 学员: {st.session_state.user_name}**")
     st.divider()
+    
+    # 💡 使用提示板块
+    st.warning("""
+    **💡 使用前必读**
+    1. **这是通用 AI**: 它不是专门的教学专家，提问时请**把背景说清楚**（如：学生年龄、学科、教学目标）。
+    2. **保持批判性**: AI 可能会“一本正经地胡说八道”，请运用你的专业知识进行核实。
+    3. **不要换号**: 全程请使用**同一个链接**和**同一个名字**，否则历史记录会丢失。
+    4. **耐心等待**: 如果没有回复，请稍等片刻，不要频繁刷新页面。
+    """)
+    
+    st.divider()
+
+    # 📝 任务说明板块
     st.info("""
     **📝 课堂任务清单**
     
@@ -227,7 +240,7 @@ with st.sidebar:
             cursor: pointer;
             font-weight: bold;
         ">
-        📤 完成后点击提交至 Moodle
+        📤 完成后点击提交至 Moodle 的 Discussion Forum
         </button>
     </a>
     """, unsafe_allow_html=True)
@@ -262,6 +275,7 @@ if prompt := st.chat_input("在此输入你的问题..."):
     # 3. 保存 AI 回复
     st.session_state.messages.append({"role": "assistant", "content": response})
     save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", response)
+
 
 
 
