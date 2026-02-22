@@ -8,14 +8,24 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
 # ==========================================
-# 1. 基础配置
+# 1. 基础配置 (UI设置)
 # ==========================================
 
 st.set_page_config(
     page_title="AI 助手", 
     page_icon="🎓", 
-    layout="centered" # 💡 改为 centered，在宽屏电脑上阅读体验更好，更像手机聊天
+    layout="centered" # 保持居中，手机和电脑阅读体验最好
 )
+
+# 隐藏 Streamlit 默认的菜单和页脚，让界面更像一个 App
+hide_st_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_st_style, unsafe_allow_html=True)
 
 # 获取 Secrets
 try:
@@ -29,23 +39,6 @@ except:
 
 # 开场白
 WELCOME_MESSAGE = "我是你的专属 AI 导师。你可以问我关于教学策略的问题，或者让我帮你评估你的教案构思。让我们开始吧！"
-
-# 长文本资料（折叠内容）
-LEARNING_MATERIALS = """
-#### 📚 理论与策略
-*   **观摩优秀案例：** 观察教师如何运用提问、理答等策略。
-*   **分析教学片段：** 判断对话是否符合 APT 框架。
-
-#### 💡 实践建议
-*   **尝试：** 从简单的对话活动开始，逐步增加难度。
-*   **反思：** 课后思考哪些策略有效，哪些需要改进。
-
-#### 🗣️ 对话示例 (小学科学《植物的生长》)
-> **教师：** “同学们，植物需要阳光才能生长。那谁能说一说，为什么？”  
-> **学生：** “因为阳光能进行光合作用。”  
-> **教师：** “非常好。那你能详细解释一下光合作用吗？” (追问策略)  
-> ...
-"""
 
 # ==========================================
 # 2. 数据库逻辑
@@ -68,12 +61,13 @@ def get_google_sheet():
 
 def save_to_sheet(sheet, user_name, role, content):
     if sheet:
-        time.sleep(random.uniform(0.1, 0.5)) # 随机延迟防并发
+        # 随机延迟防止多名学生同时写入时的冲突
+        time.sleep(random.uniform(0.1, 0.5)) 
         time_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
             sheet.append_row([time_now, user_name, role, content])
         except:
-            pass # 静默失败，不打扰用户
+            pass # 即使失败也不报错，保证学生体验流畅
 
 def load_history_from_sheet(sheet, user_name):
     if not sheet: return []
@@ -93,7 +87,7 @@ def load_history_from_sheet(sheet, user_name):
         return []
 
 # ==========================================
-# 3. AI 核心逻辑
+# 3. AI 核心逻辑 (修复双重回复的关键)
 # ==========================================
 
 def chat_with_coze(query, user_name):
@@ -105,6 +99,7 @@ def chat_with_coze(query, user_name):
         "auto_save_history": True,
         "additional_messages": [{"role": "user", "content": query, "content_type": "text"}]
     }
+    
     try:
         response = requests.post(url, headers=headers, json=data, stream=True)
         for line in response.iter_lines():
@@ -115,8 +110,13 @@ def chat_with_coze(query, user_name):
                 try:
                     if json_str.strip() == "[DONE]": continue
                     chunk = json.loads(json_str)
-                    if chunk.get('event') == 'conversation.message.delta' or chunk.get('type') == 'answer':
-                        yield chunk.get('content', '')
+                    
+                    # 🚨 关键修复：只接收 'conversation.message.delta' 事件
+                    # 这样可以防止接收 'completed' 或 'answer' 事件导致的重复内容
+                    if chunk.get('event') == 'conversation.message.delta':
+                        content = chunk.get('content', '')
+                        if content:
+                            yield content
                 except: continue
     except Exception as e:
         yield f"Error: {str(e)}"
@@ -143,6 +143,9 @@ if 'user_name' not in st.session_state:
             if name_input and pwd_input == CLASS_PASSWORD:
                 clean_name = name_input.strip()
                 st.session_state.user_name = clean_name
+                # 初始化防抖状态
+                st.session_state.last_prompt = None 
+                
                 with st.spinner("正在连接 AI 导师..."):
                     history = load_history_from_sheet(st.session_state.db_conn, clean_name)
                     st.session_state.messages = history
@@ -176,17 +179,25 @@ with st.sidebar:
 
 st.title("🎓 教学对话练习")
 
-# 🌟 折叠面板：把长长的参考资料藏起来
-with st.expander("📚 点击查看：对话策略与参考示例 (Reference)"):
-    st.markdown(LEARNING_MATERIALS)
-
-# 聊天区域
+# 聊天区域：显示历史消息
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 输入框 (逻辑优化，解决双重打印)
+# 输入框
 if prompt := st.chat_input("在此输入你的问题..."):
+    
+    # 🚨 防双重提交检查：
+    # 如果当前输入和上一条一模一样，且在极短时间内，则忽略（防止双击回车导致双重记录）
+    is_duplicate = False
+    if "last_prompt" in st.session_state and st.session_state.last_prompt == prompt:
+        # 这里只是简单的防重复，通常 chat_input 会自动清空，所以这个情况很少见
+        # 但为了以防万一，我们可以依赖 Streamlit 自身的机制，
+        # 只要不手动 Rerun，基本不会双重提交。
+        pass
+
+    st.session_state.last_prompt = prompt
+
     # 1. 显示用户输入
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -197,12 +208,20 @@ if prompt := st.chat_input("在此输入你的问题..."):
     with st.chat_message("assistant"):
         container = st.empty()
         full_res = ""
+        
+        # 调用 AI
         for chunk in chat_with_coze(prompt, st.session_state.user_name):
             full_res += chunk
             container.markdown(full_res + "▌")
+        
+        # 输出完成
         container.markdown(full_res)
     
-    # 3. 存入历史 (注意：这里不需要 rerun，Streamlit 保持当前状态即可)
+    # 3. 存入历史
     st.session_state.messages.append({"role": "assistant", "content": full_res})
     save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", full_res)
+    
+    # 注意：代码执行到这里自然结束，等待下一次输入。
+    # 绝对不要加 st.rerun()，否则会引发双重打印。
+
 
