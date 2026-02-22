@@ -169,7 +169,7 @@ if "db_conn" not in st.session_state:
 # --- 登录页 ---
 if 'user_name' not in st.session_state:
     st.markdown("<br><br>", unsafe_allow_html=True)
-    st.markdown("<h1 style='text-align: center;'>🎓 登录你的课堂</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>🎓 连接你的AI助手</h1>", unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
@@ -199,15 +199,40 @@ with st.sidebar:
     st.markdown(f"**👤 学员: {st.session_state.user_name}**")
     st.divider()
     st.info("""
-    **📝 你的任务**
+    **📝 课堂任务清单**
     
-    设计一个 5-10 分钟的课堂教学片段。
+    **Step 1. 设计教案 (5 mins)**
+    设计一个约 5 分钟的教学片段教案。
     
-    1. **要求：** 运用至少 2 种对话式教学策略。
-    2. **工具：** 自由使用 AI 辅助。
-    3. **提交：** 完成后请提交至 Moodle。
+    **Step 2. 模拟实践**
+    生成一个模拟该教案实践的对话场景（师生对话）。
+    
+    **Step 3. 分析评估**
+    结合 **APT (Academic Productive Talk)** 等策略，分析该对话场景的优缺点。
+    
+    ---
+    **🛠️ 工具**: 全程可使用本 AI 进行资料查询、教案检查、场景生成和评估。
     """)
-    st.warning("**⚠️ 提示：** AI 可能会犯错，请保持独立思考。")
+    
+    # 🔗 Moodle 跳转按钮
+    st.markdown("""
+    <a href="https://moodle.hku.hk/" target="_blank">
+        <button style="
+            width: 100%;
+            background-color: #ff4b4b;
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        ">
+        📤 完成后点击提交至 Moodle
+        </button>
+    </a>
+    """, unsafe_allow_html=True)
+
+    st.divider()
     if st.button("退出登录"):
         st.session_state.clear()
         st.rerun()
@@ -237,5 +262,6 @@ if prompt := st.chat_input("在此输入你的问题..."):
     # 3. 保存 AI 回复
     st.session_state.messages.append({"role": "assistant", "content": response})
     save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", response)
+
 
 
