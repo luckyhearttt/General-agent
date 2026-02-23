@@ -12,9 +12,9 @@ from datetime import datetime
 # ==========================================
 
 st.set_page_config(
-    page_title="AI 教学助手", 
+    page_title="AI Teaching Assistant", 
     page_icon="🎓", 
-    layout="wide"  # 🌟 改为宽屏模式，利用空间显示左右分栏
+    layout="centered"
 )
 
 hide_st_style = """
@@ -22,12 +22,6 @@ hide_st_style = """
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
             header {visibility: hidden;}
-            
-            /* 调整 tab 字体大小 */
-            button[data-baseweb="tab"] {
-                font-size: 18px !important;
-                font-weight: bold !important;
-            }
             </style>
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
@@ -36,16 +30,16 @@ try:
     COZE_API_TOKEN = st.secrets["coze"]["api_token"]
     BOT_ID = st.secrets["coze"]["bot_id"]
     SHEET_NAME = st.secrets["google"]["sheet_name"]
-    # 允许从 secrets 读取暗号，实现分组暗号不同
-    CLASS_PASSWORD = st.secrets.get("class_password", "888") 
+    CLASS_PASSWORD = "888" 
 except:
-    st.error("⚠️ 密钥未配置，请检查 Streamlit Secrets")
+    st.error("⚠️ Secrets not configured. Please contact your instructor.")
     st.stop()
 
-WELCOME_MESSAGE = "我是你的专属 AI 导师。你可以问我关于教学策略的问题，或者让我帮你评估你的教案构思。让我们开始吧！"
+# ✏️【修改】英文开场白
+WELCOME_MESSAGE = "Hi! I'm your AI teaching assistant. You can ask me about teaching strategies, or let me help you brainstorm and refine your lesson plan. Let's get started!"
 
 # ==========================================
-# 2. 数据库逻辑 (保持稳健版)
+# 2. 数据库逻辑 (不动)
 # ==========================================
 
 @st.cache_resource
@@ -60,20 +54,24 @@ def get_google_sheet():
         client = gspread.authorize(creds)
         return client.open(SHEET_NAME).sheet1
     except Exception as e:
-        st.error(f"⚠️ 无法连接数据库，请联系老师。错误详情: {e}")
+        st.error(f"⚠️ Unable to connect to database. Please contact your instructor. Error: {e}")
         return None
 
 def save_to_sheet(sheet, user_name, role, content):
-    if not sheet: return
+    if not sheet:
+        return
     time_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
     for attempt in range(3):
         try:
             time.sleep(random.uniform(0.3, 0.8))
             sheet.append_row([time_now, user_name, role, content])
             return
         except Exception as e:
-            if attempt < 2: time.sleep(2)
-            else: st.toast(f"⚠️ 记录保存失败: {e}")
+            if attempt < 2:
+                time.sleep(2)
+            else:
+                st.toast(f"⚠️ Failed to save record, but your conversation is not affected. Details: {e}")
 
 def load_history_from_sheet(sheet, user_name):
     if not sheet: return []
@@ -85,16 +83,16 @@ def load_history_from_sheet(sheet, user_name):
             if len(row) >= 4:
                 current_name = str(row[1]).strip().lower() if row[1] else ""
                 if current_name == target_name:
-                    role_map = {"学生": "user", "AI": "assistant", "AI导师": "assistant"}
+                    role_map = {"Student": "user", "AI": "assistant"}
                     role = role_map.get(row[2], "assistant")
                     user_history.append({"role": role, "content": row[3]})
         return user_history
     except Exception as e:
-        st.error(f"⚠️ 无法读取历史记录。错误详情: {e}")
+        st.error(f"⚠️ Unable to load history. Error: {e}")
         return []
 
 # ==========================================
-# 3. AI 核心逻辑 (保持 7 轮记忆)
+# 3. AI 核心逻辑 (不动)
 # ==========================================
 
 def chat_with_coze(query, user_name):
@@ -104,7 +102,7 @@ def chat_with_coze(query, user_name):
     
     context_messages = []
     if "messages" in st.session_state:
-        recent = st.session_state.messages[-14:] 
+        recent = st.session_state.messages[-14:]
         for msg in recent:
             context_messages.append({
                 "role": msg["role"],
@@ -112,7 +110,11 @@ def chat_with_coze(query, user_name):
                 "content_type": "text"
             })
     
-    context_messages.append({"role": "user", "content": query, "content_type": "text"})
+    context_messages.append({
+        "role": "user",
+        "content": query,
+        "content_type": "text"
+    })
     
     data = {
         "bot_id": BOT_ID, 
@@ -123,31 +125,183 @@ def chat_with_coze(query, user_name):
     }
     
     full_content = ""
+    
     try:
         response = requests.post(url, headers=headers, json=data, stream=True)
+        
         current_event = None
+        
         for line in response.iter_lines():
             if not line: continue
             decoded_line = line.decode('utf-8')
+            
             if decoded_line.startswith("event:"):
                 current_event = decoded_line[6:].strip()
                 continue
+            
             if decoded_line.startswith("data:"):
                 json_str = decoded_line[5:].strip()
                 if json_str == "[DONE]": continue
+                
                 if current_event == "conversation.message.delta":
                     try:
                         chunk = json.loads(json_str)
                         if chunk.get('type') == 'answer':
                             full_content += chunk.get('content', '')
-                    except: pass
+                    except:
+                        pass
+                
                 current_event = None
-        return full_content if full_content else "AI 似乎在思考，但没有回应..."
+                
+        return full_content if full_content else "AI is thinking but didn't return a response..."
+        
     except Exception as e:
-        return f"连接错误: {str(e)}"
+        return f"Connection error: {str(e)}"
 
 # ==========================================
-# 4. 界面逻辑
+# 4. 知识库内容 (新增)
+# ==========================================
+
+# ✏️【新增】知识库页面的渲染函数
+def render_knowledge_base():
+    st.markdown("## 📖 Accountable Talk & Dialogic Teaching Strategies")
+    st.markdown("Use this as a reference while designing your lesson plan.")
+    st.divider()
+
+    # --- Section 1: APT Talk Moves ---
+    st.markdown("### 1. APT: Four Goals & Eight Talk Moves")
+
+    with st.expander("🎯 Goal 1: Help individual students share, expand, and clarify their thinking (Elaborating)", expanded=False):
+        st.markdown("""
+**Move 1 — "Say More"**  
+Ask students to elaborate on a brief, vague, or unclear statement.
+
+> *"Can you say more about that?"*  
+> *"What do you mean by that?"*  
+> *"Can you give an example?"*
+
+---
+
+**Move 2 — "Revoice"**  
+The teacher restates a student's reasoning and gives them a chance to confirm or correct.
+
+> *"So let me see if I understand — you're saying … Is that right?"*  
+> *"In other words, you're suggesting …?"*
+""")
+
+    with st.expander("🎯 Goal 2: Help students deepen their reasoning (Reasoning)", expanded=False):
+        st.markdown("""
+**Move 3 — "Press for Reasoning"**  
+Ask students to explain the thinking behind their answer.
+
+> *"Why do you think that?"*  
+> *"What's your evidence?"*  
+> *"How did you arrive at that answer?"*
+
+---
+
+**Move 4 — "Challenge"**  
+Offer a counter-example or alternative perspective to test and deepen reasoning.
+
+> *"Is that always the case?"*  
+> *"What if the denominator were 0?"*  
+> *"Can you think of a case where that wouldn't work?"*  
+> *"What would someone who disagrees say?"*
+""")
+
+    with st.expander("🎯 Goal 3: Help students listen carefully to one another (Listening)", expanded=False):
+        st.markdown("""
+**Move 5 — "Restate"**  
+Prompt students to repeat or paraphrase what someone else said.
+
+> *"Who can repeat what Javon just said, in your own words?"*  
+> *"What did your partner say?"*
+""")
+
+    with st.expander("🎯 Goal 4: Help students think with others (Thinking with Others)", expanded=False):
+        st.markdown("""
+**Move 6 — "Agree / Disagree"**  
+Ask students to take a position on someone else's idea and explain why.
+
+> *"Do you agree or disagree? Why?"*  
+> *"What do you think about what she just said?"*  
+> *"Thumbs up if you agree, thumbs down if you disagree."*
+
+---
+
+**Move 7 — "Add On"**  
+Invite students to build on or extend a classmate's idea.
+
+> *"Who can add on to what Jamal said?"*  
+> *"Can anyone take that idea a step further?"*
+
+---
+
+**Move 8 — "Explain Other"**  
+Ask a student to explain another student's reasoning.
+
+> *"Who can explain what Aisha meant?"*  
+> *"Why do you think he said that?"*  
+> *"Can you explain her reasoning in your own words?"*
+""")
+
+    st.divider()
+
+    # --- Section 2: Accountable Talk ---
+    st.markdown("### 2. Accountable Talk: Three Dimensions of Accountability")
+    st.info("""
+**Accountable Talk** is a core practice framework developed by the Institute for Learning at the University of Pittsburgh. It requires classroom talk to be accountable in three dimensions:
+""")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown("""
+**🤝 To the Community**
+- Listen carefully, not just wait to speak
+- Paraphrase & build on each other's ideas
+- Challenge ideas, not people
+""")
+    with col2:
+        st.markdown("""
+**📚 To Accurate Knowledge**
+- Be specific and accurate
+- Expect & answer challenging questions
+- Use verifiable sources
+""")
+    with col3:
+        st.markdown("""
+**🧠 To Rigorous Thinking**
+- Push for quality of claims & arguments
+- Evidence must be sufficient, credible, relevant
+- Use data, examples, analogies
+""")
+
+    st.divider()
+
+    # --- Section 3: Five Principles ---
+    st.markdown("### 3. Talk Moves as Tools, Not Scripts: Five Principles")
+
+    principles = [
+        ("🔧 Tools are designed to solve problems",
+         "A tool only makes sense in light of a specific problem or purpose, and in relation to other tools in the toolkit."),
+        ("🎯 Understanding a tool requires knowing its purpose",
+         "No tool — not even a hammer — is transparent in its use. Learning to use a tool means learning the materials it acts upon."),
+        ("📈 Some tools are easier to pick up than others",
+         "For example, *Wait Time* is one of the most researched talk moves, yet it is notoriously difficult to master."),
+        ("🔗 Tools must be used in strategic sequence",
+         "This takes practice, attention to the materials, and understanding of the larger purpose."),
+        ("🪪 Tools belong to an identity",
+         "Asking teachers to adopt new tools is, in a sense, asking them to take on a new identity — one that embodies particular values and beliefs.")
+    ]
+
+    for i, (title, desc) in enumerate(principles, 1):
+        st.markdown(f"**{i}. {title}**")
+        st.markdown(f"   {desc}")
+        if i < len(principles):
+            st.markdown("")
+
+# ==========================================
+# 5. 界面逻辑
 # ==========================================
 
 if "db_conn" not in st.session_state:
@@ -156,174 +310,124 @@ if "db_conn" not in st.session_state:
 # --- 登录页 ---
 if 'user_name' not in st.session_state:
     st.markdown("<br><br>", unsafe_allow_html=True)
-    st.markdown("<h1 style='text-align: center;'>🎓 连接你的AI助手</h1>", unsafe_allow_html=True)
+    # ✏️【修改】英文
+    st.markdown("<h1 style='text-align: center;'>🎓 Connect to Your AI Assistant</h1>", unsafe_allow_html=True)
+    
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
-        st.info("👋 欢迎！请输入你的姓名和班级暗号开始练习。")
-        name_input = st.text_input("你的姓名 (拼音或英文):", key="login_name", placeholder="例如: ZhangSan01")
-        pwd_input = st.text_input("班级暗号:", type="password")
-        if st.button("🚀 开始学习", use_container_width=True):
+        st.info("👋 Welcome! Enter your name and class code to begin.")
+        name_input = st.text_input("Your Name:", key="login_name")
+        pwd_input = st.text_input("Class Code:", type="password")
+        
+        if st.button("🚀 Start", use_container_width=True):
             if name_input and pwd_input == CLASS_PASSWORD:
                 clean_name = name_input.strip()
                 st.session_state.user_name = clean_name
-                with st.spinner("正在连接 AI 导师..."):
+                with st.spinner("Connecting to AI assistant..."):
                     history = load_history_from_sheet(st.session_state.db_conn, clean_name)
                     st.session_state.messages = history
                     if not history:
                         st.session_state.messages.append({"role": "assistant", "content": WELCOME_MESSAGE})
                 st.rerun()
-            elif pwd_input != CLASS_PASSWORD: st.error("🚫 暗号错误")
-            else: st.error("⚠️ 请输入姓名")
+            elif pwd_input != CLASS_PASSWORD:
+                st.error("🚫 Incorrect class code.")
+            else:
+                st.error("⚠️ Please enter your name.")
     st.stop()
 
-# --- 主界面 ---
+# --- 侧边栏 ---
 
-# 🌟 侧边栏优化：任务在前，提示在后
 with st.sidebar:
-    st.markdown(f"**👤 学员: {st.session_state.user_name}**")
+    st.markdown(f"**👤 Student: {st.session_state.user_name}**")
     st.divider()
-    
-    # 1. 任务说明 (Green for Action)
-    st.success("""
-    **📝 课堂任务 (Task)**
-    
-    请为你未来可能教授的一个科目，设计一个约 **5分钟** 的课堂教学片段。
-    
-    **要求：**
-    1. 运用至少 **2种** 对话式教学策略 (例如 APT 策略)。
-    2. **最终提交需包含：**
-       - 教案概要 (教什么、怎么教)
-       - 模拟师生对话 (展示策略运用)
-       - 策略选择理由
-       
-    ⏱️ **时间：** 40分钟
-    """)
 
-    # Moodle 按钮
+    # ✏️【修改】任务说明放前面，精简英文版
+    st.info("""
+**📝 Your Task**
+
+Design a ~5-minute teaching segment using **at least 2 dialogic talk moves** (e.g., APT strategies). Submit:
+
+- **Lesson outline** — what & how you plan to teach  
+- **A simulated dialogue** — show what your dialogic teaching looks like  
+- **Brief rationale** — why you chose these strategies
+
+---
+
+💡 Consider real classroom complexity — students may be silent, give partial answers, or surprise you.
+
+💡 Use AI however you like — brainstorm, get feedback, generate content, discuss ideas, etc.
+
+⏱️ **Time: 40 min.** Submit on Moodle when done.
+""")
+
+    # ✏️【修改】Moodle 按钮
     st.markdown("""
-    <a href="https://moodle.hku.hk/" target="_blank" style="text-decoration:none;">
-        <button style="width:100%;background-color:#ff4b4b;color:white;border:none;padding:10px;border-radius:5px;font-weight:bold;cursor:pointer;">
-        📤 点击跳转至 Moodle 提交
+    <a href="https://moodle.hku.hk/" target="_blank">
+        <button style="
+            width: 100%;
+            background-color: #ff4b4b;
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        ">
+        📤 Submit to Moodle Discussion Forum
         </button>
     </a>
     """, unsafe_allow_html=True)
 
     st.divider()
 
-    # 2. AI 提示 (Blue for Info)
-    st.info("""
-    **🤖 使用提示 (Tips)**
-    
-    1. **背景清晰**: AI 不是神，提问时请把你的教学背景、年级、科目告诉它。
-    2. **保持账号**: 全程使用同一个名字登录，否则记录会丢。
-    3. **利用 AI**: 让它帮你查资料、润色对话、反驳你的观点。
-    """)
-    
-    if st.button("🚪 退出登录"):
+    # ✏️【修改】使用提示放后面，精简英文版
+    st.warning("""
+**🤖 Tips**
+1. **General AI** — Not a dialogic teaching expert. Give it context when asking.
+2. **Keep your name** — Use the same link & name throughout, or history will be lost.
+3. **Be patient** — If no response, wait a moment. Don't refresh repeatedly.
+""")
+
+    st.divider()
+    if st.button("Log Out"):
         st.session_state.clear()
         st.rerun()
 
-st.title("🎓 对话式教学工作台")
+# --- 主内容区：Tabs ---
 
-# 🌟 核心布局：Tabs 分栏
-tab_chat, tab_knowledge = st.tabs(["💬 AI 对话助手", "📖 对话式教学知识库"])
+# ✏️【新增】顶部 Tabs 切换
+tab1, tab2 = st.tabs(["💬 AI Chat", "📖 Dialogic Teaching Reference"])
 
-# --- Tab 1: 聊天界面 ---
-with tab_chat:
-    # 聊天历史显示
-    msg_container = st.container()
-    with msg_container:
-        for msg in st.session_state.messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+with tab1:
+    # 显示历史消息
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+with tab2:
+    render_knowledge_base()
+
+# 处理输入 (放在 tabs 外面，这样在任何 tab 下都能输入)
+if prompt := st.chat_input("Type your message here..."):
     
-    # 空白占位，防止输入框遮挡最后一条消息
-    st.markdown("<br><br><br>", unsafe_allow_html=True)
-
-# --- Tab 2: 知识库界面 ---
-with tab_knowledge:
-    st.markdown("### 📚 知识库 / Knowledge Base")
-    st.caption("这里整理了 APT 和 Accountable Talk 的核心概念，供设计教案时参考。")
-    
-    with st.expander("📌 1. APT 四大目标与八种对话策略 (Talk Moves)", expanded=True):
-        st.markdown("""
-        **目标一：帮助个别学生分享、扩展和澄清自己的想法 (Elaborating)**
-        > *让学生把话说清楚、说具体。*
-        - **策略1「多说 Say More」**：要求学生通过多说来扩展自己的观点。
-          - *"你可以再多说一点吗？" / "Can you say more about that?"*
-        - **策略2「重述确认 Revoice」**：教师重述学生的观点并求证。
-          - *"你是说……对吗？" / "So you are saying... is that right?"*
-
-        **目标二：帮助学生加深推理 (Reasoning)**
-        > *让学生不仅给出答案，还要给出理由。*
-        - **策略3「追问推理 Press for Reasoning」**：要求学生解释推理过程。
-          - *"你为什么这么认为？" / "Why do you think that?"*
-        - **策略4「挑战 Challenge」**：提出反例或不同观点。
-          - *"如果分母为0会发生什么？" / "What if..."*
-
-        **目标三：帮助学生认真倾听彼此 (Listening)**
-        > *建立倾听的课堂文化。*
-        - **策略5「重新阐述 Restate」**：引导学生重复他人的观点。
-          - *"谁能重复一下他刚才说的话？" / "Who can rephrase what he just said?"*
-
-        **目标四：引导学生与他人共同思考 (Thinking with Others)**
-        > *让思维产生碰撞和连接。*
-        - **策略6「同意/不同意 Agree/Disagree」**：对他人的观点做出判断。
-          - *"你同意他的观点吗？为什么？" / "Do you agree or disagree? Why?"*
-        - **策略7「补充 Add On」**：对同学的想法进行延伸。
-          - *"谁可以补充他的想法？" / "Who can add on to this idea?"*
-        - **策略8「引导解释他人 Explain Other」**：解释另一位同学的观点。
-          - *"你认为他为什么会这么说？" / "Why do you think she said that?"*
-        """)
-
-    with st.expander("🛡️ 2. Accountable Talk 三大负责任维度"):
-        st.markdown("""
-        **1. 对学习社群负责 (Accountability to the Learning Community)**
-        *   认真倾听彼此。
-        *   挑战观点，而不是挑战个人。
-        
-        **2. 对准确知识负责 (Accountability to Accurate Knowledge)**
-        *   发言要具体、准确，而非随口一说。
-        *   信息来源要可验证。
-        
-        **3. 对严谨思维负责 (Accountability to Rigorous Thinking)**
-        *   关注论据的质量。
-        *   使用数据、类比、假设情景来支撑观点。
-        """)
-
-    with st.expander("🔧 3. Talk Moves 使用原则 (Tools not Scripts)"):
-        st.markdown("""
-        1.  **工具为解决问题而设计** (Tools are designed to solve problems)
-        2.  **使用工具需要了解其用途** (Understanding a tool requires knowing its purpose)
-        3.  **有些工具比其他工具更容易上手** (Some tools are easier to pick up than others) - *例如“等待时间”看起来简单，其实很难。*
-        4.  **工具需要按策略性顺序使用** (Tools must be used in strategic sequence)
-        5.  **工具与身份认同相关** (Tools belong to a tool kit associated with an identity)
-        """)
-
-# --- 输入框 (注意：st.chat_input 始终固定在底部) ---
-if prompt := st.chat_input("在此输入你的想法或问题..."):
-    # 逻辑：无论在哪个 Tab 输入，都视为在 Chat Tab 的操作
-    
-    # 1. 记录用户输入
+    # 1. 显示用户输入
     st.session_state.messages.append({"role": "user", "content": prompt})
-    save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "学生", prompt)
-
-    # 2. 强制刷新界面，确保如果在 Tab 2 输入，也能看到消息更新
-    # (Streamlit 机制：输入后会自动 rerun，所以这部分自动处理了)
-
-    # 3. 在 Tab 1 显示新消息 (实际上 rerun 后会重绘整个页面)
-    with tab_chat:
-         with st.chat_message("user"):
+    with tab1:
+        with st.chat_message("user"):
             st.markdown(prompt)
-            
-         with st.chat_message("assistant"):
-            with st.spinner("🧠 AI 正在分析你的回答..."):
+    save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "Student", prompt)
+
+    # 2. 生成 AI 回复
+    with tab1:
+        with st.chat_message("assistant"):
+            with st.spinner("🧠 AI is analyzing your response..."):
                 response = chat_with_coze(prompt, st.session_state.user_name)
                 st.markdown(response)
-
-    # 4. 保存记录
+    
+    # 3. 保存 AI 回复
     st.session_state.messages.append({"role": "assistant", "content": response})
     save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", response)
+
 
 
 
