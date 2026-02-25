@@ -14,14 +14,16 @@ from datetime import datetime
 st.set_page_config(
     page_title="AI Teaching Assistant", 
     page_icon="🎓", 
-    layout="centered"
+    layout="centered",
+    initial_sidebar_state="expanded"
 )
 
+# ✏️【修改】只隐藏footer和deploy按钮，保留侧边栏开关
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
-            header {visibility: hidden;}
+            .stDeployButton {display: none;}
             </style>
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
@@ -35,8 +37,7 @@ except:
     st.error("⚠️ Secrets not configured. Please contact your instructor.")
     st.stop()
 
-# ✏️【修改】英文开场白
-WELCOME_MESSAGE = "Hi! I'm your AI teaching assistant. You can ask me about teaching strategies, or let me help you brainstorm and refine your lesson plan. Let's get started!"
+WELCOME_MESSAGE = "Hi! I'm your AI assistant. You can ask me about anything, or let me help you brainstorm and refine your plan. Let's get started!"
 
 # ==========================================
 # 2. 数据库逻辑 (不动)
@@ -159,16 +160,14 @@ def chat_with_coze(query, user_name):
         return f"Connection error: {str(e)}"
 
 # ==========================================
-# 4. 知识库内容 (新增)
+# 4. 知识库内容 (不动)
 # ==========================================
 
-# ✏️【新增】知识库页面的渲染函数
 def render_knowledge_base():
     st.markdown("## 📖 Accountable Talk & Dialogic Teaching Strategies")
     st.markdown("Use this as a reference while designing your lesson plan.")
     st.divider()
 
-    # --- Section 1: APT Talk Moves ---
     st.markdown("### 1. APT: Four Goals & Eight Talk Moves")
 
     with st.expander("🎯 Goal 1: Help individual students share, expand, and clarify their thinking (Elaborating)", expanded=False):
@@ -247,7 +246,6 @@ Ask a student to explain another student's reasoning.
 
     st.divider()
 
-    # --- Section 2: Accountable Talk ---
     st.markdown("### 2. Accountable Talk: Three Dimensions of Accountability")
     st.info("""
 **Accountable Talk** is a core practice framework developed by the Institute for Learning at the University of Pittsburgh. It requires classroom talk to be accountable in three dimensions:
@@ -278,7 +276,6 @@ Ask a student to explain another student's reasoning.
 
     st.divider()
 
-    # --- Section 3: Five Principles ---
     st.markdown("### 3. Talk Moves as Tools, Not Scripts: Five Principles")
 
     principles = [
@@ -301,16 +298,139 @@ Ask a student to explain another student's reasoning.
             st.markdown("")
 
 # ==========================================
+# 4b. 任务步骤页面 (新增)
+# ==========================================
+
+# ✏️【新增】任务步骤页面，包含问卷链接和Moodle提交
+def render_task_page():
+    st.markdown("## 📝 Your Task: Step by Step")
+    st.markdown("Follow these three steps to complete today's activity.")
+    st.divider()
+
+    # --- STEP 1 ---
+    with st.expander("**Step 1: Pre-Survey** (Complete this first!)", expanded=True):
+        st.markdown("""
+Before starting the task, please complete a short survey about your AI usage and dialogic teaching knowledge.
+
+⏱️ Estimated time: **5-7 minutes**
+""")
+        # ✏️【填入你的前测问卷链接】
+        SURVEY_1_LINK = "https://your-pre-survey-link-here.com"
+        
+        st.markdown(f"""
+<a href="{SURVEY_1_LINK}" target="_blank">
+    <button style="
+        width: 100%;
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        padding: 12px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-weight: bold;
+        font-size: 16px;
+    ">
+    📋 Open Pre-Survey
+    </button>
+</a>
+""", unsafe_allow_html=True)
+
+    st.markdown("")
+
+    # --- STEP 2 ---
+    with st.expander("**Step 2: Design Task with AI** (Main activity — 40 min)", expanded=True):
+        st.markdown("""
+Design a **~5-minute teaching segment** for a subject you may teach in the future.
+
+Your design must use **at least 2 dialogic teaching strategies** (e.g., APT talk moves).
+
+**Submit 3 things on Moodle:**
+
+1. 📋 **Lesson outline** — What will you teach? How?
+2. 💬 **A simulated teacher-student dialogue** — Show what your dialogic teaching might look like
+3. 📝 **Brief rationale** — Why did you choose these strategies?
+
+---
+
+💡 Consider real classroom complexity — students may be silent, give partial answers, or surprise you.
+
+💡 Use AI however you like — brainstorm, get feedback, generate content, discuss ideas, etc.
+
+⏱️ **Time: 40 minutes.**
+
+---
+
+When you're done, submit your work on Moodle:
+""")
+        # ✏️【填入你的Moodle链接】
+        MOODLE_LINK = "https://moodle.hku.hk/your-forum-link-here"
+        
+        st.markdown(f"""
+<a href="{MOODLE_LINK}" target="_blank">
+    <button style="
+        width: 100%;
+        background-color: #ff4b4b;
+        color: white;
+        border: none;
+        padding: 12px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-weight: bold;
+        font-size: 16px;
+    ">
+    📤 Submit to Moodle Discussion Forum
+    </button>
+</a>
+""", unsafe_allow_html=True)
+
+    st.markdown("")
+
+    # --- STEP 3 ---
+    with st.expander("**Step 3: Post-Survey & Reflection** (After finishing the task)", expanded=True):
+        st.markdown("""
+After completing your design task, please take a few minutes to reflect on your AI experience and fill in a short survey.
+
+⏱️ Estimated time: **5-7 minutes**
+""")
+        # ✏️【填入你的后测问卷链接】
+        SURVEY_2_LINK = "https://your-post-survey-link-here.com"
+        
+        st.markdown(f"""
+<a href="{SURVEY_2_LINK}" target="_blank">
+    <button style="
+        width: 100%;
+        background-color: #2196F3;
+        color: white;
+        border: none;
+        padding: 12px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-weight: bold;
+        font-size: 16px;
+    ">
+    📝 Open Post-Survey
+    </button>
+</a>
+""", unsafe_allow_html=True)
+
+# ==========================================
 # 5. 界面逻辑
 # ==========================================
 
 if "db_conn" not in st.session_state:
     st.session_state.db_conn = get_google_sheet()
 
+# ✏️【新增】初始化页面状态
+if "current_page" not in st.session_state:
+    st.session_state.current_page = "chat"
+
+# ✏️【新增】初始化处理状态（防止连续提交）
+if "is_processing" not in st.session_state:
+    st.session_state.is_processing = False
+
 # --- 登录页 ---
 if 'user_name' not in st.session_state:
     st.markdown("<br><br>", unsafe_allow_html=True)
-    # ✏️【修改】英文
     st.markdown("<h1 style='text-align: center;'>🎓 Connect to Your AI Assistant</h1>", unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1,2,1])
@@ -341,46 +461,27 @@ with st.sidebar:
     st.markdown(f"**👤 Student: {st.session_state.user_name}**")
     st.divider()
 
-    # ✏️【修改】任务说明放前面，精简英文版
-    st.info("""
-**📝 Your Task**
-
-Design a ~5-minute teaching segment using **at least 2 dialogic talk moves** (e.g., APT strategies). Submit:
-
-- **Lesson outline** — what & how you plan to teach  
-- **A simulated dialogue** — show what your dialogic teaching looks like  
-- **Brief rationale** — why you chose these strategies
-
----
-
-💡 Consider real classroom complexity — students may be silent, give partial answers, or surprise you.
-
-💡 Use AI however you like — brainstorm, get feedback, generate content, discuss ideas, etc.
-
-⏱️ **Time: 40 min.** Submit on Moodle when done.
-""")
-
-    # ✏️【修改】Moodle 按钮
-    st.markdown("""
-    <a href="https://moodle.hku.hk/" target="_blank">
-        <button style="
-            width: 100%;
-            background-color: #ff4b4b;
-            color: white;
-            border: none;
-            padding: 10px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-        ">
-        📤 Submit to Moodle Discussion Forum
-        </button>
-    </a>
-    """, unsafe_allow_html=True)
+    # ✏️【修改】侧边栏导航按钮
+    st.markdown("**📌 Navigation**")
+    
+    if st.button("💬 AI Chat", use_container_width=True, 
+                 type="primary" if st.session_state.current_page == "chat" else "secondary"):
+        st.session_state.current_page = "chat"
+        st.rerun()
+    
+    if st.button("📝 Task Steps & Links", use_container_width=True,
+                 type="primary" if st.session_state.current_page == "task" else "secondary"):
+        st.session_state.current_page = "task"
+        st.rerun()
+    
+    if st.button("📖 Dialogic Teaching Reference", use_container_width=True,
+                 type="primary" if st.session_state.current_page == "reference" else "secondary"):
+        st.session_state.current_page = "reference"
+        st.rerun()
 
     st.divider()
 
-    # ✏️【修改】使用提示放后面，精简英文版
+    # ✏️【保留】Tips
     st.warning("""
 **🤖 Tips**
 1. **General AI** — Not a dialogic teaching expert. Give it context when asking.
@@ -393,40 +494,52 @@ Design a ~5-minute teaching segment using **at least 2 dialogic talk moves** (e.
         st.session_state.clear()
         st.rerun()
 
-# --- 主内容区：Tabs ---
+# --- 主内容区：根据侧边栏选择渲染 ---
 
-# ✏️【新增】顶部 Tabs 切换
-tab1, tab2 = st.tabs(["💬 AI Chat", "📖 Dialogic Teaching Reference"])
-
-with tab1:
+if st.session_state.current_page == "chat":
+    # ✏️【修改】聊天页面标题
+    st.markdown("## 💬 AI Chat")
+    st.caption("Ask me anything — I'm here to help you with your teaching design.")
+    st.divider()
+    
     # 显示历史消息
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-with tab2:
-    render_knowledge_base()
-
-# 处理输入 (放在 tabs 外面，这样在任何 tab 下都能输入)
-if prompt := st.chat_input("Type your message here..."):
-    
-    # 1. 显示用户输入
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with tab1:
+    # 处理输入
+    # ✏️【修改】添加处理状态保护
+    if prompt := st.chat_input("Type your message here...", disabled=st.session_state.is_processing):
+        
+        # 设置处理中状态
+        st.session_state.is_processing = True
+        
+        # 1. 显示用户输入
+        st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
-    save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "Student", prompt)
+        save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "Student", prompt)
 
-    # 2. 生成 AI 回复
-    with tab1:
+        # 2. 生成 AI 回复
         with st.chat_message("assistant"):
-            with st.spinner("🧠 AI is analyzing your response..."):
+            with st.spinner("🧠 AI is thinking..."):
                 response = chat_with_coze(prompt, st.session_state.user_name)
                 st.markdown(response)
-    
-    # 3. 保存 AI 回复
-    st.session_state.messages.append({"role": "assistant", "content": response})
-    save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", response)
+        
+        # 3. 保存 AI 回复
+        st.session_state.messages.append({"role": "assistant", "content": response})
+        save_to_sheet(st.session_state.db_conn, st.session_state.user_name, "AI", response)
+        
+        # 4. 重置处理状态
+        st.session_state.is_processing = False
+        st.rerun()
+
+elif st.session_state.current_page == "task":
+    render_task_page()
+
+elif st.session_state.current_page == "reference":
+    render_knowledge_base()
+
 
 
 
