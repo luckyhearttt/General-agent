@@ -32,7 +32,10 @@ try:
     COZE_API_TOKEN = st.secrets["coze"]["api_token"]
     BOT_ID = st.secrets["coze"]["bot_id"]
     SHEET_NAME = st.secrets["google"]["sheet_name"]
-    CLASS_PASSWORD = "888" 
+    CLASS_PASSWORD = st.secrets["auth"]["class_password"]
+    SURVEY_1_LINK = st.secrets["links"]["survey_1"]
+    SURVEY_2_LINK = st.secrets["links"]["survey_2"]
+    MOODLE_LINK = st.secrets["links"]["moodle"]
 except:
     st.error("⚠️ Secrets not configured. Please contact your instructor.")
     st.stop()
@@ -314,8 +317,6 @@ Before starting the task, please complete a short survey about your AI usage and
 
 ⏱️ Estimated time: **5-7 minutes**
 """)
-        # ✏️【填入你的前测问卷链接】
-        SURVEY_1_LINK = "https://your-pre-survey-link-here.com"
         
         st.markdown(f"""
 <a href="{SURVEY_1_LINK}" target="_blank">
@@ -340,15 +341,13 @@ Before starting the task, please complete a short survey about your AI usage and
     # --- STEP 2 ---
     with st.expander("**Step 2: Design Task with AI** (Main activity — 40 min)", expanded=True):
         st.markdown("""
-Design a **~5-minute teaching segment** for a subject you may teach in the future.
+Design a **5–10 minute lesson plan** for a classroom activity you may teach in the future. Please use **dialogic teaching** in your design.
 
-Your design must use **at least 2 dialogic teaching strategies** (e.g., APT talk moves).
+You may design and include the following:
 
-**Submit 3 things on Moodle:**
-
-1. 📋 **Lesson outline** — What will you teach? How?
-2. 💬 **A simulated teacher-student dialogue** — Show what your dialogic teaching might look like
-3. 📝 **Brief rationale** — Why did you choose these strategies?
+1. 📋 **Lesson plan** — What will you teach? What learning objectives would you like to achieve?
+2. 📝 **Conduct plan** — How do you plan to conduct the lesson to achieve these objectives?
+3. 💬 **A simulated teacher-student dialogue** — Show what your dialogic teaching might look like
 
 ---
 
@@ -360,10 +359,8 @@ Your design must use **at least 2 dialogic teaching strategies** (e.g., APT talk
 
 ---
 
-When you're done, submit your work on Moodle:
+When you're done, click the button below to submit your work on the Moodle Discussion Forum.
 """)
-        # ✏️【填入你的Moodle链接】
-        MOODLE_LINK = "https://moodle.hku.hk/your-forum-link-here"
         
         st.markdown(f"""
 <a href="{MOODLE_LINK}" target="_blank">
@@ -392,8 +389,6 @@ After completing your design task, please take a few minutes to reflect on your 
 
 ⏱️ Estimated time: **5-7 minutes**
 """)
-        # ✏️【填入你的后测问卷链接】
-        SURVEY_2_LINK = "https://your-post-survey-link-here.com"
         
         st.markdown(f"""
 <a href="{SURVEY_2_LINK}" target="_blank">
@@ -483,8 +478,8 @@ with st.sidebar:
 
     # ✏️【保留】Tips
     st.warning("""
-**🤖 Tips**
-1. **General AI** — Not a dialogic teaching expert. Give it context when asking.
+**💡 Tips**
+1. **General AI** — This AI is not a dialogic teaching expert. Give it context when asking.
 2. **Keep your name** — Use the same link & name throughout, or history will be lost.
 3. **Be patient** — If no response, wait a moment. Don't refresh repeatedly.
 """)
@@ -539,6 +534,7 @@ elif st.session_state.current_page == "task":
 
 elif st.session_state.current_page == "reference":
     render_knowledge_base()
+
 
 
 
