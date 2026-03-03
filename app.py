@@ -32,6 +32,11 @@ try:
     BOT_ID = st.secrets["coze"]["bot_id"]
     SHEET_NAME = st.secrets["google"]["sheet_name"]
     CLASS_PASSWORD = st.secrets["auth"]["class_password"]
+    # ✏️【新增】四个跳转链接
+    TASK_GUIDE_LINK = st.secrets["links"]["task_guide"]
+    SURVEY_1_LINK = st.secrets["links"]["survey_1"]
+    MOODLE_LINK = st.secrets["links"]["moodle"]
+    REFLECTIVE_SURVEY_LINK = st.secrets["links"]["reflective_survey"]
 except:
     st.error("⚠️ Secrets not configured. Please contact your instructor.")
     st.stop()
@@ -207,6 +212,16 @@ with st.sidebar:
     st.markdown(f"**👤 Student: {st.session_state.user_name}**")
     st.divider()
 
+    # ✏️【新增】四个跳转按钮
+    st.markdown("**📌 Quick Links**")
+
+    st.link_button("📖 Task Guide & Transcript", TASK_GUIDE_LINK, use_container_width=True)
+    st.link_button("📋 Submit Part 1 (Survey)", SURVEY_1_LINK, use_container_width=True)
+    st.link_button("📤 Submit Part 2 (Moodle)", MOODLE_LINK, use_container_width=True)
+    st.link_button("📝 Reflective Survey", REFLECTIVE_SURVEY_LINK, use_container_width=True)
+
+    st.divider()
+
     st.warning("""
 **💡 Tips**
 1. **Be patient** — If no response, wait a moment. Don't refresh.
@@ -252,6 +267,7 @@ if prompt := st.chat_input("Type your message here...", disabled=st.session_stat
     # 4. 重置状态
     st.session_state.is_processing = False
     st.rerun()
+
 
 
 
